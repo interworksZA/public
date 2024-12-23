@@ -6,7 +6,7 @@
 # command in installer_one_liner.txt.
 
 # Configuration
-SCRIPT_URL="https://raw.githubusercontent.com/interworksZA/public/main/keys/public_keys.sh"
+SCRIPT_URL="https://raw.githubusercontent.com/interworksZA/public/main/keys/public_keys.txt"
 SCRIPT_PATH="/usr/local/bin/public_keys.sh"
 CRON_JOB="0 2 * * 1 $SCRIPT_PATH"
 
