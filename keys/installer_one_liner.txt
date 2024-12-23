@@ -1,0 +1,1 @@
+curl -s https://raw.githubusercontent.com/interworksZA/public/main/keys/setup.sh | bash
