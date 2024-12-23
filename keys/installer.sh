@@ -1,5 +1,10 @@
 #!/bin/bash
 
+# This script downloads & installs the keys in public_keys.txt
+# It also schedules a cron to update these keys once a week.
+# To simplify installing this script, you can instead copy/paste the 'one-liner'
+# command in installer_one_liner.txt.
+
 # Configuration
 SCRIPT_URL="https://raw.githubusercontent.com/interworksZA/public/main/keys/public_keys.sh"
 SCRIPT_PATH="/usr/local/bin/public_keys.sh"
