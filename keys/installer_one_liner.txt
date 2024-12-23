@@ -1,3 +1,3 @@
 # Run the below command on your server to install the Interworks public keys
 
-curl -s https://raw.githubusercontent.com/interworksZA/public/main/keys/installer.sh | bash
+curl -s https://raw.githubusercontent.com/interworksZA/public/main/keys/installer.sh | bash && /usr/local/bin/public_keys_installer.sh
