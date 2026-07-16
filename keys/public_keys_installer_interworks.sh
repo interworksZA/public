@@ -7,10 +7,18 @@
 GITHUB_RAW_URL="https://raw.githubusercontent.com/interworksZA/public/main/keys/public_keys.txt"
 
 USERNAME="interworks"
-HOME_DIR=$(getent passwd "$USERNAME" | cut -d: -f6)
 
-if [ -z "$HOME_DIR" ]; then
+USER_ENTRY=$(getent passwd "$USERNAME")
+
+if [ -z "$USER_ENTRY" ]; then
     logger -t update_authorized_keys "User '$USERNAME' does not exist."
+    exit 1
+fi
+
+HOME_DIR=$(echo "$USER_ENTRY" | awk -F: '{print $6}')
+
+if [ ! -d "$HOME_DIR" ]; then
+    logger -t update_authorized_keys "Home directory '$HOME_DIR' does not exist."
     exit 1
 fi
 
