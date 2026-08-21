@@ -83,31 +83,42 @@ while IFS= read -r line || [ -n "$line" ]; do
     echo "$line" >> "$VALID_KEYS_FILE"
 done < "$TEMP_KEYS_FILE"
 
-# Remove old versions of users that exist in the validated key set
-# Match is done on the exact last field (comment), not a substring/regex match,
-# to avoid unsafe pattern injection and accidental partial matches.
+# Build the new authorized_keys content entirely in a working copy.
+# The live authorized_keys file is never edited in place; it is only
+# ever replaced once, atomically, at the very end.
+WORK_FILE="${SSH_DIR}/.authorized_keys.work.$$"
+cp "$AUTHORIZED_KEYS_FILE" "$WORK_FILE"
+
+# Remove old versions of users that exist in the validated key set.
+# Match is done on the exact last field (comment), not a substring/regex
+# match, to avoid unsafe pattern injection and accidental partial matches.
 while IFS= read -r line; do
     [ -z "$line" ] && continue
 
     COMMENT=$(echo "$line" | awk '{print $NF}')
 
-    if awk -v c="$COMMENT" '$NF == c { found=1 } END { exit !found }' "$AUTHORIZED_KEYS_FILE"; then
-        awk -v c="$COMMENT" '$NF != c' "$AUTHORIZED_KEYS_FILE" > "${AUTHORIZED_KEYS_FILE}.tmp"
-        mv "${AUTHORIZED_KEYS_FILE}.tmp" "$AUTHORIZED_KEYS_FILE"
+    if awk -v c="$COMMENT" '$NF == c { found=1 } END { exit !found }' "$WORK_FILE"; then
+        awk -v c="$COMMENT" '$NF != c' "$WORK_FILE" > "${WORK_FILE}.tmp"
+        mv "${WORK_FILE}.tmp" "$WORK_FILE"
         logger -t update_authorized_keys "Removed old key for user: $COMMENT"
     fi
 done < "$VALID_KEYS_FILE"
 
 # Add latest validated keys
-cat "$VALID_KEYS_FILE" >> "$AUTHORIZED_KEYS_FILE"
+cat "$VALID_KEYS_FILE" >> "$WORK_FILE"
 
 # Remove duplicates
-sort -u "$AUTHORIZED_KEYS_FILE" > "${AUTHORIZED_KEYS_FILE}.new"
-mv "${AUTHORIZED_KEYS_FILE}.new" "$AUTHORIZED_KEYS_FILE"
+sort -u "$WORK_FILE" > "${WORK_FILE}.sorted"
+mv "${WORK_FILE}.sorted" "$WORK_FILE"
 
-# Final permissions
-chown "$USERNAME:$USERNAME" "$AUTHORIZED_KEYS_FILE"
-chmod 600 "$AUTHORIZED_KEYS_FILE"
+# Set correct ownership/permissions on the working copy before it goes live
+chown "$USERNAME:$USERNAME" "$WORK_FILE"
+chmod 600 "$WORK_FILE"
+
+# Atomically replace the live authorized_keys file.
+# mv within the same directory/filesystem is atomic: sshd will only ever
+# see the complete old file or the complete new file, never a partial one.
+mv "$WORK_FILE" "$AUTHORIZED_KEYS_FILE"
 
 logger -t update_authorized_keys "Updated $AUTHORIZED_KEYS_FILE with keys from GitHub."
 
