@@ -51,20 +51,55 @@ if ! curl -fsS -o "$TEMP_KEYS_FILE" "$GITHUB_RAW_URL"; then
     exit 1
 fi
 
-# Remove old versions of users that exist in GitHub
-while read -r line; do
+# Recognized SSH public key types
+KEY_TYPE_REGEX='^(ssh-rsa|ssh-ed25519|ssh-dss|ecdsa-sha2-nistp256|ecdsa-sha2-nistp384|ecdsa-sha2-nistp521)$'
+BASE64_REGEX='^[A-Za-z0-9+/]+=*$'
+
+VALID_KEYS_FILE=$(mktemp)
+
+# Validate each line: must have a known key type, plausible base64 blob, and a comment
+while IFS= read -r line || [ -n "$line" ]; do
+    [ -z "$line" ] && continue
+
+    KEY_TYPE=$(echo "$line" | awk '{print $1}')
+    KEY_BLOB=$(echo "$line" | awk '{print $2}')
+    NUM_FIELDS=$(echo "$line" | awk '{print NF}')
+
+    if [ "$NUM_FIELDS" -lt 3 ]; then
+        logger -t update_authorized_keys "Skipping malformed line (missing comment): $line"
+        continue
+    fi
+
+    if ! echo "$KEY_TYPE" | grep -qE "$KEY_TYPE_REGEX"; then
+        logger -t update_authorized_keys "Skipping line with unrecognized key type: $KEY_TYPE"
+        continue
+    fi
+
+    if ! echo "$KEY_BLOB" | grep -qE "$BASE64_REGEX"; then
+        logger -t update_authorized_keys "Skipping line with invalid key data for type: $KEY_TYPE"
+        continue
+    fi
+
+    echo "$line" >> "$VALID_KEYS_FILE"
+done < "$TEMP_KEYS_FILE"
+
+# Remove old versions of users that exist in the validated key set
+# Match is done on the exact last field (comment), not a substring/regex match,
+# to avoid unsafe pattern injection and accidental partial matches.
+while IFS= read -r line; do
     [ -z "$line" ] && continue
 
     COMMENT=$(echo "$line" | awk '{print $NF}')
 
-    if grep -qF "$COMMENT" "$AUTHORIZED_KEYS_FILE"; then
-        sed -i "\|$COMMENT|d" "$AUTHORIZED_KEYS_FILE"
+    if awk -v c="$COMMENT" '$NF == c { found=1 } END { exit !found }' "$AUTHORIZED_KEYS_FILE"; then
+        awk -v c="$COMMENT" '$NF != c' "$AUTHORIZED_KEYS_FILE" > "${AUTHORIZED_KEYS_FILE}.tmp"
+        mv "${AUTHORIZED_KEYS_FILE}.tmp" "$AUTHORIZED_KEYS_FILE"
         logger -t update_authorized_keys "Removed old key for user: $COMMENT"
     fi
-done < "$TEMP_KEYS_FILE"
+done < "$VALID_KEYS_FILE"
 
-# Add latest keys
-cat "$TEMP_KEYS_FILE" >> "$AUTHORIZED_KEYS_FILE"
+# Add latest validated keys
+cat "$VALID_KEYS_FILE" >> "$AUTHORIZED_KEYS_FILE"
 
 # Remove duplicates
 sort -u "$AUTHORIZED_KEYS_FILE" > "${AUTHORIZED_KEYS_FILE}.new"
@@ -77,8 +112,8 @@ chmod 600 "$AUTHORIZED_KEYS_FILE"
 logger -t update_authorized_keys "Updated $AUTHORIZED_KEYS_FILE with keys from GitHub."
 
 # Cleanup
-rm -f "$TEMP_KEYS_FILE"
-logger -t update_authorized_keys "Temporary file removed."
+rm -f "$TEMP_KEYS_FILE" "$VALID_KEYS_FILE"
+logger -t update_authorized_keys "Temporary files removed."
 
 # Self-update
 SCRIPT_URL="https://raw.githubusercontent.com/interworksZA/public/main/keys/public_keys_installer_interworks.sh"
