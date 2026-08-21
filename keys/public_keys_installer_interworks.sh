@@ -30,13 +30,6 @@ mkdir -p "$SSH_DIR"
 chown "$USERNAME:$USERNAME" "$SSH_DIR"
 chmod 700 "$SSH_DIR"
 
-# Backup existing authorized_keys if it exists
-if [ -f "$AUTHORIZED_KEYS_FILE" ]; then
-    BACKUP_FILE="${AUTHORIZED_KEYS_FILE}.bak.$(date +%F_%T)"
-    cp "$AUTHORIZED_KEYS_FILE" "$BACKUP_FILE"
-    logger -t update_authorized_keys "Backup created: $BACKUP_FILE"
-fi
-
 # Ensure authorized_keys exists
 touch "$AUTHORIZED_KEYS_FILE"
 chown "$USERNAME:$USERNAME" "$AUTHORIZED_KEYS_FILE"
@@ -84,8 +77,7 @@ while IFS= read -r line || [ -n "$line" ]; do
 done < "$TEMP_KEYS_FILE"
 
 # Build the new authorized_keys content entirely in a working copy.
-# The live authorized_keys file is never edited in place; it is only
-# ever replaced once, atomically, at the very end.
+# The live authorized_keys file is never edited in place.
 WORK_FILE="${SSH_DIR}/.authorized_keys.work.$$"
 cp "$AUTHORIZED_KEYS_FILE" "$WORK_FILE"
 
@@ -100,7 +92,6 @@ while IFS= read -r line; do
     if awk -v c="$COMMENT" '$NF == c { found=1 } END { exit !found }' "$WORK_FILE"; then
         awk -v c="$COMMENT" '$NF != c' "$WORK_FILE" > "${WORK_FILE}.tmp"
         mv "${WORK_FILE}.tmp" "$WORK_FILE"
-        logger -t update_authorized_keys "Removed old key for user: $COMMENT"
     fi
 done < "$VALID_KEYS_FILE"
 
@@ -111,16 +102,28 @@ cat "$VALID_KEYS_FILE" >> "$WORK_FILE"
 sort -u "$WORK_FILE" > "${WORK_FILE}.sorted"
 mv "${WORK_FILE}.sorted" "$WORK_FILE"
 
-# Set correct ownership/permissions on the working copy before it goes live
+# Set correct ownership/permissions on the working copy before comparing/swapping
 chown "$USERNAME:$USERNAME" "$WORK_FILE"
 chmod 600 "$WORK_FILE"
 
-# Atomically replace the live authorized_keys file.
-# mv within the same directory/filesystem is atomic: sshd will only ever
-# see the complete old file or the complete new file, never a partial one.
-mv "$WORK_FILE" "$AUTHORIZED_KEYS_FILE"
+# Only touch the live file if the content actually changed.
+# This avoids creating a backup and rewriting authorized_keys on every
+# run when nothing has changed (e.g. weekly cron with no key updates).
+if cmp -s "$WORK_FILE" "$AUTHORIZED_KEYS_FILE"; then
+    logger -t update_authorized_keys "No changes detected; authorized_keys left untouched."
+    rm -f "$WORK_FILE"
+else
+    BACKUP_FILE="${AUTHORIZED_KEYS_FILE}.bak.$(date +%F_%T)"
+    cp "$AUTHORIZED_KEYS_FILE" "$BACKUP_FILE"
+    logger -t update_authorized_keys "Backup created: $BACKUP_FILE"
 
-logger -t update_authorized_keys "Updated $AUTHORIZED_KEYS_FILE with keys from GitHub."
+    # Atomically replace the live authorized_keys file.
+    # mv within the same directory/filesystem is atomic: sshd will only
+    # ever see the complete old file or the complete new file.
+    mv "$WORK_FILE" "$AUTHORIZED_KEYS_FILE"
+
+    logger -t update_authorized_keys "Updated $AUTHORIZED_KEYS_FILE with keys from GitHub."
+fi
 
 # Cleanup
 rm -f "$TEMP_KEYS_FILE" "$VALID_KEYS_FILE"
