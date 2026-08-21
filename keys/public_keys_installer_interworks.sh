@@ -30,10 +30,15 @@ mkdir -p "$SSH_DIR"
 chown "$USERNAME:$USERNAME" "$SSH_DIR"
 chmod 700 "$SSH_DIR"
 
-# Ensure authorized_keys exists
-touch "$AUTHORIZED_KEYS_FILE"
-chown "$USERNAME:$USERNAME" "$AUTHORIZED_KEYS_FILE"
-chmod 600 "$AUTHORIZED_KEYS_FILE"
+# Only initialize authorized_keys if it doesn't already exist.
+# Avoids touching mtime/ownership/permissions on every run when the
+# file is already present and correct.
+if [ ! -f "$AUTHORIZED_KEYS_FILE" ]; then
+    touch "$AUTHORIZED_KEYS_FILE"
+    chown "$USERNAME:$USERNAME" "$AUTHORIZED_KEYS_FILE"
+    chmod 600 "$AUTHORIZED_KEYS_FILE"
+    logger -t update_authorized_keys "Created new empty $AUTHORIZED_KEYS_FILE"
+fi
 
 # Download the latest keys
 TEMP_KEYS_FILE=$(mktemp)
@@ -78,8 +83,13 @@ done < "$TEMP_KEYS_FILE"
 
 # Build the new authorized_keys content entirely in a working copy.
 # The live authorized_keys file is never edited in place.
+# Use a placeholder base if the live file doesn't exist yet.
 WORK_FILE="${SSH_DIR}/.authorized_keys.work.$$"
-cp "$AUTHORIZED_KEYS_FILE" "$WORK_FILE"
+if [ -f "$AUTHORIZED_KEYS_FILE" ]; then
+    cp "$AUTHORIZED_KEYS_FILE" "$WORK_FILE"
+else
+    : > "$WORK_FILE"
+fi
 
 # Remove old versions of users that exist in the validated key set.
 # Match is done on the exact last field (comment), not a substring/regex
@@ -109,13 +119,15 @@ chmod 600 "$WORK_FILE"
 # Only touch the live file if the content actually changed.
 # This avoids creating a backup and rewriting authorized_keys on every
 # run when nothing has changed (e.g. weekly cron with no key updates).
-if cmp -s "$WORK_FILE" "$AUTHORIZED_KEYS_FILE"; then
+if [ -f "$AUTHORIZED_KEYS_FILE" ] && cmp -s "$WORK_FILE" "$AUTHORIZED_KEYS_FILE"; then
     logger -t update_authorized_keys "No changes detected; authorized_keys left untouched."
     rm -f "$WORK_FILE"
 else
-    BACKUP_FILE="${AUTHORIZED_KEYS_FILE}.bak.$(date +%F_%T)"
-    cp "$AUTHORIZED_KEYS_FILE" "$BACKUP_FILE"
-    logger -t update_authorized_keys "Backup created: $BACKUP_FILE"
+    if [ -f "$AUTHORIZED_KEYS_FILE" ]; then
+        BACKUP_FILE="${AUTHORIZED_KEYS_FILE}.bak.$(date +%F_%T)"
+        cp "$AUTHORIZED_KEYS_FILE" "$BACKUP_FILE"
+        logger -t update_authorized_keys "Backup created: $BACKUP_FILE"
+    fi
 
     # Atomically replace the live authorized_keys file.
     # mv within the same directory/filesystem is atomic: sshd will only
