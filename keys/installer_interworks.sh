@@ -83,9 +83,12 @@ echo "$SCRIPT_PATH"
 # ------------------------------------------------------------
 # Create root cron job
 # ------------------------------------------------------------
+# NOTE: 'crontab -l' exits non-zero when root has no crontab yet.
+# Under 'set -e' that would abort the subshell before the echo runs
+# and install an EMPTY crontab, so the listing is guarded with '|| true'.
 
 if ! crontab -l 2>/dev/null | grep -qF "$CRON_JOB"; then
-    (crontab -l 2>/dev/null; echo "$CRON_JOB") | crontab -
+    (crontab -l 2>/dev/null || true; echo "$CRON_JOB") | crontab -
     echo "Cron job added:"
     echo "$CRON_JOB"
 else
