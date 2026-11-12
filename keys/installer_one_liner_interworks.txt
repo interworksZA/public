@@ -1,0 +1,2 @@
+# Use this One Liner to run the SSH Key Import for the Interworks User
+curl -fsS https://raw.githubusercontent.com/interworksZA/public/main/keys/installer_interworks.sh | bash
